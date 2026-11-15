@@ -11,7 +11,7 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
-
+use libc::Ioctl;
 use super::protocol::{self, TtySpec};
 
 const BUF_SIZE: usize = 8192;
@@ -335,7 +335,7 @@ fn run_pty(
             if libc::setsid() < 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            if libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_int, 0 as libc::c_int) < 0 {
+            if libc::ioctl(slave_fd, libc::TIOCSCTTY as Ioctl, 0 as libc::c_int) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             if libc::dup2(slave_fd, 0) < 0
@@ -432,7 +432,7 @@ fn run_pty(
                             ws_ypixel: 0,
                         };
                         unsafe {
-                            libc::ioctl(master_raw, libc::TIOCSWINSZ as libc::c_int, &ws);
+                            libc::ioctl(master_raw, libc::TIOCSWINSZ as Ioctl, &ws);
                         }
                     }
                 }

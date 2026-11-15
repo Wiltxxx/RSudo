@@ -9,7 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-
+use libc::Ioctl;
 use crate::cli::{Cli, Kind, PathLayout};
 use crate::context::TermuxEnv;
 use crate::decisions;
@@ -141,7 +141,7 @@ fn get_umask() -> u32 {
 
 fn get_winsize(fd: RawFd) -> (u16, u16) {
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
-    let ret = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ as libc::c_int, &mut ws) };
+    let ret = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ as Ioctl, &mut ws) };
     if ret == 0 && ws.ws_row > 0 && ws.ws_col > 0 {
         (ws.ws_row, ws.ws_col)
     } else {
