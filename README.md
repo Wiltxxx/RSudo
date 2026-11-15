@@ -1,8 +1,8 @@
-# rsudo
+# RSudo
 
 > 为 Termux 打造的高性能 `sudo` 替代品 —— Rust 实现，支持 su 直连与常驻守护进程两种模式。
 
-`rsudo` 让你在 Termux / Android 环境下以 root 身份执行命令、打开交互式 shell、运行脚本。它完全兼容 Termux 的路径体系与 `su`（Magisk / KernelSU / SuperSU 等）的 CLI，同时提供一个可选的常驻守护进程，把每次调用的延迟压到最低。
+`RSudo` 让你在 Termux / Android 环境下以 root 身份执行命令、打开交互式 shell、运行脚本。它完全兼容 Termux 的路径体系与 `su`（Magisk / KernelSU / SuperSU 等）的 CLI，同时提供一个可选的常驻守护进程，把每次调用的延迟压到最低。
 
 ---
 
