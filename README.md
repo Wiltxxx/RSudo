@@ -1,72 +1,82 @@
 # RSudo
+
 [![TUR Package](https://img.shields.io/badge/TUR-rsudo-blueviolet)](https://github.com/termux-user-repository/tur)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-> 为 Termux 打造的高性能 `sudo` 替代品 —— Rust 实现，支持 su 直连与常驻守护进程两种模式。
+> A high-performance `sudo` alternative for Termux, written in Rust. Supports both direct `su` and a resident daemon mode.
 
-`RSudo` 让你在 Termux / Android 环境下以 root 身份执行命令、打开交互式 shell、运行脚本。它完全兼容 Termux 的路径体系与 `su`（Magisk / KernelSU / SuperSU 等）的 CLI，同时提供一个可选的常驻守护进程，把每次调用的延迟压到最低。
+`RSudo` allows you to execute commands as root, open interactive shells, and run scripts seamlessly in Termux / Android environments. It is fully compatible with Termux's path system and the CLI of various `su` implementations (Magisk / KernelSU / SuperSU, etc.), while offering an optional resident daemon to minimize invocation latency.
 
----
+## 📦 Installation (via TUR)
 
-## 目录
-
-- [特性](#特性)
-- [环境要求](#环境要求)
-- [构建与安装](#构建与安装)
-- [快速开始](#快速开始)
-- [命令模式](#命令模式)
-- [路径解析：Termux 还是 Android？](#路径解析termux-还是-android)
-- [环境变量导出](#环境变量导出)
-- [Mount master](#mount-master)
-- [守护进程（daemon）](#守护进程daemon)
-- [Sudoers 授权](#sudoers-授权)
-- [审计日志](#审计日志)
-- [PTY 控制](#pty-控制)
-- [配置文件](#配置文件)
-- [安全模型](#安全模型)
-- [工作原理](#工作原理)
-- [设计取舍](#设计取舍)
-- [许可证](#许可证)
-
----
-
-## 特性
-
-- **两种执行模式**
-- **su 直连**：不需要后台进程，完全依赖系统 `su`，随时可用。
-- **daemon 常驻**：首次调用自动拉起守护进程，之后通过 Unix socket 直接执行，无需每次弹 Magisk 授权框，显著降低延迟。
-- **与 `su` 兼容的命令行**：支持 `--mount-master`、`-c` 等参数（视 `su` 实现而定），自动探测能力并降级。
-- **Termux / Android 双路径体系**：可选 `-t`（Termux 优先）、`-a`（Android 优先），并通过 `-T/-TT/-A/-AA` 精确锁定 PATH 范围。
-- **交互式与脚本模式**：`rsudo su`、`rsudo asu`、`rsudo -i`、`rsudo -s <script>` 覆盖常见场景。
-- **脚本生成与 `--dry-run`**：可查看实际运行的 shell 脚本，方便调试与审计。
-- **按 uid 授权的 sudoers**：`allow <uid>`，与 `user ALL=(ALL) ALL` 语义等价。
-- **内置审计日志**：记录每次 root 执行的 uid、pid、argv 与时间戳。
-- **PTY 支持**：对需要 tty 的命令自动分配 pty；支持窗口大小调整、stdin 管道输入。
-- **安全的进程间协议**：`SO_PEERCRED` 校验客户端 uid，`MAGIC` + 版本号握手，帧格式长度前缀校验。
-
----
-
-## 环境要求
-
-- **Android 设备**，已安装以下之一：
-- [Magisk](https://github.com/topjohnwu/Magisk)
-- [KernelSU](https://github.com/tiann/KernelSU)
-- 其他提供标准 `su` CLI 的 root 方案
-- **Termux**（推荐），或任何能运行 Rust 编译产物的 Termux 环境。
-- **Android SDK**：代码根据 `ro.build.version.sdk` 选择 Android 侧 PATH，缺省按 SDK 28 处理。
-- **Rust 工具链**：`cargo`、`rustc`（建议 1.70+；项目使用 `edition = 2021`）。
-
----
-
-## 构建与安装
+The easiest way to install `rsudo` is through the [Termux User Repository (TUR)](https://github.com/termux-user-repository/tur):
 
 ```bash
-git clone https://github.com/<your>/rsudo.git
-cd rsudo
+pkg install tur-repo
+pkg install rsudo
+```
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Build from Source](#build-from-source)
+- [Quick Start](#quick-start)
+- [Command Modes](#command-modes)
+- [Path Resolution: Termux vs. Android](#path-resolution-termux-vs-android)
+- [Environment Variable Export](#environment-variable-export)
+- [Mount Master](#mount-master)
+- [Daemon Mode](#daemon-mode)
+- [Sudoers & Authorization](#sudoers--authorization)
+- [Audit Logging](#audit-logging)
+- [PTY Control](#pty-control)
+- [Configuration File](#configuration-file)
+- [Security Model](#security-model)
+- [How It Works](#how-it-works)
+- [Design Trade-offs](#design-trade-offs)
+- [License](#license)
+
+---
+
+## Features
+
+- **Dual Execution Modes:**
+  - **Direct `su`:** No background processes, relies entirely on system `su`, ready to use out-of-the-box.
+  - **Daemon Mode:** Auto-spawns a resident daemon on first use. Subsequent commands are executed directly via a Unix socket, bypassing repetitive Magisk authorization prompts and significantly reducing latency.
+- **`su`-Compatible CLI:** Supports flags like `--mount-master`, `-c`, etc. (depending on the `su` implementation), with automatic capability detection and graceful degradation.
+- **Dual Path Resolution (Termux / Android):** Choose between `-t` (Termux priority) and `-a` (Android priority). Finer control with `-T/-TT/-A/-AA` to lock the PATH scope.
+- **Interactive & Script Modes:** Covers common scenarios with `rsudo su`, `rsudo asu`, `rsudo -i`, and `rsudo -s <script>`.
+- **Script Generation & `--dry-run`:** View the actual shell script that will be executed for easier debugging and auditing.
+- **UID-based Sudoers:** `allow <uid>` semantics equivalent to `user ALL=(ALL) ALL`.
+- **Built-in Audit Logging:** Records the uid, pid, argv, and timestamp of every root execution.
+- **PTY Support:** Automatically allocates a pty for commands requiring a tty; supports window resizing and stdin piping.
+- **Secure IPC Protocol:** `SO_PEERCRED` client UID verification, `MAGIC` + version handshake, and length-prefixed frame validation.
+
+---
+
+## Requirements
+
+- **Android Device** with one of the following installed:
+  - [Magisk](https://github.com/topjohnwu/Magisk)
+  - [KernelSU](https://github.com/tiann/KernelSU)
+  - Other root solutions providing standard `su` CLI.
+- **Termux** (recommended), or any environment capable of running Rust binaries.
+- **Android SDK:** The code determines the Android-side PATH based on `ro.build.version.sdk` (defaults to SDK 28 if absent).
+- **Rust Toolchain:** `cargo`, `rustc` (v1.70+ recommended; project uses `edition = 2021`).
+
+---
+
+## Build from Source
+
+```bash
+git clone https://github.com/Wiltxxx/Rsudo.git
+cd Rsudo
 cargo build --release
 ```
 
-产物体积已通过 `Cargo.toml` 中的发布配置优化：
+The binary size is highly optimized via the release profile in `Cargo.toml`:
 
 ```toml
 [profile.release]
@@ -77,14 +87,14 @@ panic = "abort"
 codegen-units = 1
 ```
 
-安装到 `$PREFIX/bin`：
+Install to `$PREFIX/bin`:
 
 ```bash
 cp target/release/rsudo "$PREFIX/bin/rsudo"
 chmod +x "$PREFIX/bin/rsudo"
 ```
 
-可选：创建 `sudo` 软链（注意 **与系统 `su` 的语义差异**，建议先熟悉 `rsudo`）：
+Optional: Create a `sudo` symlink (Note: **Semantic differences** exist compared to system `su`; please familiarize yourself with `rsudo` first):
 
 ```bash
 ln -sf "$PREFIX/bin/rsudo" "$PREFIX/bin/sudo"
@@ -92,293 +102,278 @@ ln -sf "$PREFIX/bin/rsudo" "$PREFIX/bin/sudo"
 
 ---
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 以 root 执行单条命令
+# Execute a single command as root
 rsudo id
 
-# 交互式 root shell（默认 Termux 优先）
+# Interactive root shell (Termux priority by default)
 rsudo su
 
-# 交互式 root shell（Android 优先）
+# Interactive root shell (Android priority)
 rsudo asu
 
-# 指定 shell
+# Specify a shell
 rsudo -i --shell zsh
 
-# 执行一段脚本
+# Execute a script snippet
 rsudo -s 'echo hello from root; id'
 
-# 查看将要执行的脚本（不实际运行）
+# View the script to be executed (without running)
 rsudo --dry-run --mount-master id
 ```
 
 ---
 
-## 命令模式
+## Command Modes
 
-`rsudo` 会根据输入自行判定运行模式（`Kind`）：
+`rsudo` determines the execution mode (`Kind`) based on the input:
 
-| 输入 | 模式 | 说明 |
+| Input | Mode | Description |
 |---|---|---|
-| `rsudo <command> [args...]` | `Exec` | 解析并执行命令 |
-| `rsudo su` | `Su` | 交互式 shell，**Termux 优先** |
-| `rsudo asu` | `Asu` | 交互式 shell，**Android 优先** |
-| `rsudo -i [--shell SHELL]` | `Interactive` | 交互式 shell |
-| `rsudo -s <script> [args...]` | `Script` | 脚本模式 |
-| `rsudo -p <command> ...` | `Exec` | 强制把第一个参数当路径，禁用 `su`/`asu` 识别 |
+| `rsudo <command> [args...]` | `Exec` | Parses and executes the command |
+| `rsudo su` | `Su` | Interactive shell, **Termux priority** |
+| `rsudo asu` | `Asu` | Interactive shell, **Android priority** |
+| `rsudo -i [--shell SHELL]` | `Interactive` | Interactive shell |
+| `rsudo -s <script> [args...]` | `Script` | Script mode |
+| `rsudo -p <command> ...` | `Exec` | Forces the first arg as a path, disables `su`/`asu` detection |
 
-### 相关 CLI 参数
+### Relevant CLI Flags
 
-| 参数 | 说明 |
+| Flag | Description |
 |---|---|
-| `-i, --interactive` | 打开交互式 shell |
-| `-s, --script` | 脚本模式 |
-| `-p, --path` | 强制命令模式，禁用 `su`/`asu` 关键字 |
-| `--shell <SHELL>` | 交互/脚本模式使用的 shell（默认 `bash`） |
-| `--shell-home <PATH>` | root 用户的 HOME（默认 `$HOME/.suroot`） |
-| `--dry-run` | 打印生成的脚本而不执行 |
-| `-v / -vv / -vvv` | 详细日志（路径决策 / 模式与参数 / 完整脚本） |
+| `-i, --interactive` | Open an interactive shell |
+| `-s, --script` | Script mode |
+| `-p, --path` | Force command mode, disable `su`/`asu` keywords |
+| `--shell <SHELL>` | Shell to use for interactive/script modes (default `bash`) |
+| `--shell-home <PATH>` | Root user's HOME (default `$HOME/.suroot`) |
+| `--dry-run` | Print the generated script without executing |
+| `-v / -vv / -vvv` | Verbose logging (path decisions / mode & args / full script) |
 
-> **注意**：交互式模式下如果同时给了命令，`-i` 会被忽略并给出提示；命令模式下 `--shell` 同样被忽略。两种提示都可用 `--force-path` 关闭。
+> **Note:** If a command is provided in interactive mode, `-i` is ignored with a warning. In command mode, `--shell` is similarly ignored. Both warnings can be suppressed with `--force-path`.
 
 ---
 
-## 路径解析：Termux 还是 Android？
+## Path Resolution: Termux vs. Android
 
-`rsudo` 内部把 PATH 策略抽象为 `PathLayout`：
+`rsudo` abstracts PATH strategies internally as `PathLayout`:
 
-| 枚举值 | 触发条件 | PATH 内容 |
+| Enum Value | Trigger Condition | PATH Content |
 |---|---|---|
-| `TermuxFull` | 默认（命令位于 `$ROOTFS` 下）或 `-t` | Termux 全量 PATH |
+| `TermuxFull` | Default (command under `$ROOTFS`) or `-t` | Full Termux PATH |
 | `TermuxMinimal` | `-T` | `$PREFIX/bin` + applets |
-| `TermuxBinOnly` | `-TT` | 仅 `$PREFIX/bin` |
-| `AndroidFull` | 默认（命令位于 `$ROOTFS` 外）或 `-a` | Android 全量 PATH |
-| `AndroidSystemOnly` | `-A` | 仅 `/system/bin` |
-| `AndroidBinOnly` | `-AA` | 全部 Android bin 目录 |
+| `TermuxBinOnly` | `-TT` | Only `$PREFIX/bin` |
+| `AndroidFull` | Default (command outside `$ROOTFS`) or `-a` | Full Android PATH |
+| `AndroidSystemOnly` | `-A` | Only `/system/bin` |
+| `AndroidBinOnly` | `-AA` | All Android bin directories |
 
-### 命令行参数
+### CLI Flags
 
-| 参数 | 作用 |
+| Flag | Action |
 |---|---|
-| `-t, --termux-priority` | 优先 `$PREFIX/bin` |
-| `-T, --termux-only` | 收紧为 Termux 范围；`-TT` 进一步收紧 |
-| `-a, --android-priority` | 优先 Android bin |
-| `-A, --android-only` | 收紧为 Android 范围；`-AA` 进一步收紧 |
+| `-t, --termux-priority` | Prioritize `$PREFIX/bin` |
+| `-T, --termux-only` | Restrict to Termux scope; `-TT` restricts further |
+| `-a, --android-priority` | Prioritize Android bin |
+| `-A, --android-only` | Restrict to Android scope; `-AA` restricts further |
 
-`-T/-A` 使用 `ArgAction::Count`，可通过重复参数分级。
+`-T/-A` uses `ArgAction::Count`, allowing repetition to grade the restriction.
 
-### 命令解析
+### Command Resolution
 
-`Exec` 模式下，`rsudo` 会按当前 `SearchMode` 在 PATH 中查找命令：
+In `Exec` mode, `rsudo` searches for the command in PATH based on the current `SearchMode`:
+- `TermuxFirst`: `$PREFIX/bin` priority;
+- `AndroidFirst`: Android bin priority;
+- `AndroidOnly`: Search only in Android bin.
 
-- `TermuxFirst`：`$PREFIX/bin` 优先；
-- `AndroidFirst`：Android bin 优先；
-- `AndroidOnly`：只在 Android bin 中查找。
+Upon successful resolution, it automatically determines the `PathLayout` based on whether the command falls under `$TERMUX__ROOTFS_DIR` (unless the user explicitly specified `-t/-a/-T/-A`).
 
-解析成功后，会根据命令是否落在 `$TERMUX__ROOTFS_DIR` 下自动决定 `PathLayout`（除非用户显式指定了 `-t/-a/-T/-A`）。
-
-> 若 `su` 的 `--mount-master` 是必需的（例如执行 `./su` 相关操作），`rsudo` 会在检测到 root home 位于 `/system/...` 时自动降级到 su 路径，并加 `--mount-master`。
+> If `su --mount-master` is required (e.g., for `./su` operations), `rsudo` automatically degrades to the su path and appends `--mount-master` if it detects the root home is located in `/system/...`.
 
 ---
 
-## 环境变量导出
+## Environment Variable Export
 
-`rsudo` 默认构造一份干净的 root 环境（`PATH`、`TERMUX__PREFIX`、`TERMUX__HOME`、`HOME`、`TMPDIR`、`TERM`、`LANG` 等）。通过以下参数追加来自调用者的环境：
+By default, `rsudo` constructs a clean root environment (`PATH`, `TERMUX__PREFIX`, `TERMUX__HOME`, `HOME`, `TMPDIR`, `TERM`, `LANG`, etc.). Use the following flags to append variables from the caller:
 
-| 参数 | 作用 |
+| Flag | Action |
 |---|---|
-| `-P, --export-all-path` | 把调用者 `$PATH` 追加到生成的 `PATH` |
-| `-L, --export-all-ld-lib-path` | 把调用者 `$LD_LIBRARY_PATH` 追加到生成的 `LD_LIBRARY_PATH` |
-| `--export-paths <PATHS>` | 额外冒号分隔路径追加到 `PATH` |
-| `--export-ld-lib-paths <PATHS>` | 额外冒号分隔路径追加到 `LD_LIBRARY_PATH` |
+| `-P, --export-all-path` | Append caller's `$PATH` to the generated `PATH` |
+| `-L, --export-all-ld-lib-path` | Append caller's `$LD_LIBRARY_PATH` to the generated one |
+| `--export-paths <PATHS>` | Append colon-separated paths to `PATH` |
+| `--export-ld-lib-paths <PATHS>` | Append colon-separated paths to `LD_LIBRARY_PATH` |
 
 ---
 
-## Mount master
+## Mount Master
 
-某些场景（例如挂载命名空间相关的操作）需要 `su` 的 `--mount-master`。
+Certain scenarios (e.g., mount namespace operations) require `su`'s `--mount-master`.
 
-| 参数 | 作用 |
+| Flag | Action |
 |---|---|
-| `--mount-master` | 强制开启 |
-| `--no-mount-master` | 强制关闭 |
+| `--mount-master` | Force enable |
+| `--no-mount-master` | Force disable |
 
-默认策略：
-
-- 交互式 shell：`Termux` 优先级时通常启用；
-- `Exec` 模式：如果 root home 位于 `/system/...`，`mount::requires_su_path` 会要求使用 `--mount-master`，并因此**禁用 daemon**，回退到 su。
+Default policy:
+- **Interactive shell:** Usually enabled when `Termux` priority is set.
+- **Exec mode:** If the root home is under `/system/...`, `mount::requires_su_path` will mandate `--mount-master`, thereby **disabling the daemon** and falling back to `su`.
 
 ---
 
-## 守护进程（daemon）
+## Daemon Mode
 
-daemon 是本项目性能的关键。启用后，`rsudo` 在首次调用时（通过 `su`）拉起一个常驻进程，之后所有命令都走 Unix socket，绕开 `su` 的启动与授权延迟。
+The daemon is the key to this project's performance. Once enabled, `rsudo` spawns a resident process (via `su`) on the first invocation. All subsequent commands communicate via a Unix socket, bypassing `su`'s startup and authorization latency.
 
-### 生命周期
+### Lifecycle
 
 ```text
-首次调用 ──▶ 检测 socket ──▶ 不存在 → spawn daemon（su -c …）
+First call ──▶ Check socket ──▶ Not found → spawn daemon (su -c …)
 │                 │
-└───▶ 连接 ◀─────┘
+└───▶ Connect ◀─────┘
 │
 ▼
-发送 Request / 接收 Frame
+Send Request / Receive Frame
 ```
 
-- 单实例锁：`/data/local/tmp/rsudo.lock`（`flock`）。
-- 禁用标记：`/data/local/tmp/rsudo.disabled`（兼容旧路径 `/data/adb/rsudo/disabled`）。
-- socket：`/data/local/tmp/rsudo.sock`。
-- 日志：`/data/local/tmp/rsudo-daemon.log`。
-- 空闲超时：默认无限制，可通过 `--daemon-idle-timeout <SECS>` 设置。
+- Single instance lock: `/data/local/tmp/rsudo.lock` (`flock`).
+- Disabled marker: `/data/local/tmp/rsudo.disabled` (compatible with legacy `/data/adb/rsudo/disabled`).
+- Socket: `/data/local/tmp/rsudo.sock`.
+- Logs: `/data/local/tmp/rsudo-daemon.log`.
+- Idle timeout: Unlimited by default, configurable via `--daemon-idle-timeout <SECS>`.
 
-### 控制命令
+### Control Commands
 
-| 参数 | 作用 |
+| Flag | Action |
 |---|---|
-| `--daemon-boot` | 安装启动脚本并立即启动 daemon |
-| `--daemon-enable` | 重新启用 daemon（清除 disabled 标记） |
-| `--daemon-disable` | 禁用 daemon，之后的调用全部回退 su 路径 |
-| `--daemon-restart` | 重启 daemon（重新加载 sudoers） |
-| `--daemon-status` | 显示 daemon 状态（pid、socket、sudoers、audit 等） |
+| `--daemon-boot` | Install boot script and start daemon immediately |
+| `--daemon-enable` | Re-enable daemon (clears disabled marker) |
+| `--daemon-disable` | Disable daemon, all future calls fall back to `su` |
+| `--daemon-restart` | Restart daemon (reloads sudoers) |
+| `--daemon-status` | Show daemon status (pid, socket, sudoers, audit, etc.) |
 
-所有控制命令都通过 `su -c '<exe> …'` 重新以 root 执行，因此只会看到**一次** Magisk 授权提示。
+All control commands re-execute as root via `su -c '<exe> …'`, so you will only see **one** Magisk authorization prompt.
 
-### daemon 何时不使用
+### When is the Daemon NOT used?
 
-以下情况会**自动降级**到 su 路径：
+The following cases **automatically degrade** to the su path:
+- `--daemon-disable` or disabled marker exists;
+- `--dry-run` (daemon execs directly, no script generation);
+- `Kind::Su` / `Kind::Asu`;
+- `-i` / `--shell` explicitly specified;
+- `--mount-master` required but root home is under `/system/...`;
+- Connection fails and daemon startup times out.
 
-- `--daemon-disable` 或已存在 disabled 标记；
-- `--dry-run`（daemon 直接 exec，不生成脚本）；
-- `Kind::Su` / `Kind::Asu`；
-- `-i` / `--shell` 显式指定；
-- `--mount-master` 必需但 root home 位于 `/system/...`；
-- 连接失败且 daemon 启动超时。
+### IPC Protocol
 
-### 通信协议
+- `MAGIC = 0x5253_5544` ("RSUD"), `VERSION = 6`.
+- Frame format: `[kind: u8][len: u32 BE][payload]`, `len` max 16 MiB.
+- Request frames (Client → Daemon): `FRAME_CANCEL`, `FRAME_STDIN`, `FRAME_RESIZE` (`[rows: u16 BE][cols: u16 BE]`).
+- Response frames (Daemon → Client): `FRAME_STDOUT`, `FRAME_STDERR`, `FRAME_EXIT` (`[rc: i32 BE]`), `FRAME_ERROR`, `FRAME_LOG`.
 
-- `MAGIC = 0x5253_5544`（"RSUD"），`VERSION = 6`。
-- 帧格式：`[kind: u8][len: u32 BE][payload]`，`len` 上限 16 MiB。
-- 请求帧类型（客户端 → daemon）：
-- `FRAME_CANCEL`：取消当前子进程；
-- `FRAME_STDIN`：喂给子进程的 stdin；
-- `FRAME_RESIZE`：`[rows: u16 BE][cols: u16 BE]`，pty 窗口尺寸变更。
-- 响应帧类型（daemon → 客户端）：
-- `FRAME_STDOUT` / `FRAME_STDERR`：流式输出；
-- `FRAME_EXIT`：`[rc: i32 BE]`；
-- `FRAME_ERROR`：错误文本；
-- `FRAME_LOG`：`--debug` 调试日志。
-
-> 每次连接都会执行 `SO_PEERCRED` 校验客户端 uid。
+> Every connection undergoes `SO_PEERCRED` client UID verification.
 
 ---
 
-## Sudoers 授权
+## Sudoers & Authorization
 
-默认路径：`/data/adb/rsudo/sudoers.conf`。
+Default path: `/data/adb/rsudo/sudoers.conf`.
 
-**格式**（按 uid 授权，语义等价于 `user ALL=(ALL) ALL`）：
+**Format** (UID-based, equivalent to `user ALL=(ALL) ALL`):
 
 ```text
-# 注释
+# Comment
 allow 0
 allow 10123
 ```
 
-### 管理命令
+### Management Commands
 
-| 参数 | 作用 |
+| Flag | Action |
 |---|---|
-| `--sudoers-add <UID>` | 追加 `allow <uid>`（幂等） |
-| `--sudoers-del <UID>` | 删除对应行 |
-| `--sudoers-list` | 打印当前列表 |
+| `--sudoers-add <UID>` | Append `allow <uid>` (idempotent) |
+| `--sudoers-del <UID>` | Delete the corresponding line |
+| `--sudoers-list` | Print the current list |
 
-添加 / 删除后会提示是否需要 `--daemon-restart` 重新加载。
+After adding/removing, you will be prompted whether to `--daemon-restart` to reload.
 
-### 加载校验
+### Load Validation
 
-`Sudoers::load` 会校验：
+`Sudoers::load` validates the following:
+- Opens with `O_NOFOLLOW`, rejects symlinks;
+- Must be a regular file;
+- Owner must be `root` (uid 0);
+- Permissions must be `0600`.
 
-- `O_NOFOLLOW` 打开，拒绝符号链接；
-- 必须是普通文件；
-- owner 必须是 `root`（uid 0）；
-- 权限必须是 `0600`。
-
-任何不满足都会**拒绝启动 daemon**。
+Failure to meet any condition **refuses to start the daemon**.
 
 ---
 
-## 审计日志
+## Audit Logging
 
-默认路径：`/data/adb/rsudo/audit.log`。
+Default path: `/data/adb/rsudo/audit.log`.
 
-每次成功通过 daemon 执行的命令都会追加一行：
+Every successful command executed via the daemon appends a line:
 
 ```text
 2026-01-01T00:00:00Z uid=10123 pid=12345 argv=["id"]
 ```
 
-查看最近 N 条：
+View recent N entries:
 
 ```bash
-rsudo --audit          # 默认 20 条
-rsudo --audit 100      # 最近 100 条
+rsudo --audit          # Default 20
+rsudo --audit 100      # Recent 100
 ```
 
 ---
 
-## PTY 控制
+## PTY Control
 
-部分命令（例如 `ssh`、`top`、交互式 TUI）在非 tty 下行为异常。daemon 路径通过 `PtyConfig` 决定是否为某条命令分配 pty：
+Some commands (e.g., `ssh`, `top`, interactive TUIs) behave abnormally without a tty. The daemon path uses `PtyConfig` to decide whether to allocate a pty:
+- `--edit-pty`: Open an interactive PTY configuration editor (mode + whitelist/blacklist).
+- The client decides whether to enter a pty session based on `pty_cfg.decide(cmd)`.
+- If the caller's stdin is **not a tty**, the client reads all stdin and sends it as `Request.stdin` to the daemon, which closes the pty input with **EOT** (`0x04`) to prevent hangs like `echo hi | rsudo cat`.
+- In pty mode, window resizes are forwarded via `SIGWINCH` → `FRAME_RESIZE`.
 
-- `--edit-pty`：打开交互式 PTY 配置编辑器（模式 + 白/黑名单）。
-- 客户端根据 `pty_cfg.decide(cmd)` 决定是否进入 pty 会话。
-- 若调用者 stdin **不是 tty**，客户端会把 stdin 全部读入，作为 `Request.stdin` 发给 daemon，并由 daemon 以 **EOT**（`0x04`）关闭 pty 输入，避免 `echo hi | rsudo cat` 之类的管道 hang 住。
-- pty 模式下窗口大小变化通过 `SIGWINCH` → `FRAME_RESIZE` 转发。
-
-> daemon 侧在 `stdin_eof = true` 时会关闭 pty 的 `ECHO/ECHOE/ECHOK/ECHONL`，防止管道输入被回显成双份。
+> The daemon side disables `ECHO/ECHOE/ECHOK/ECHONL` on the pty when `stdin_eof = true` to prevent piped input from being double-echoed.
 
 ---
 
-## 配置文件
+## Configuration File
 
-路径：`$PREFIX/etc/rsudo.conf`
+Path: `$PREFIX/etc/rsudo.conf`.
+Format: `key = value` per line, `#` for comments. Supported keys:
 
-每行 `key = value`，`#` 开始为注释。支持的键（含 `SUDO_` 与 `SUDO__` 两种前缀）：
-
-| 键 | 作用 |
+| Key | Action |
 |---|---|
-| `SUDO_SHELL_HOME` | 等价 `--shell-home` |
-| `SUDO_SHELL` | 等价 `--shell` |
-| `SUDO_ADDITIONAL_PATHS_TO_EXPORT` | 等价 `--export-paths` |
-| `SUDO_ADDITIONAL_LD_LIBRARY_PATHS_TO_EXPORT` | 等价 `--export-ld-lib-paths` |
-| `SUDO_LOG_LEVEL` | 等价 `-v` 的级别 |
+| `SUDO_SHELL_HOME` | Equivalent to `--shell-home` |
+| `SUDO_SHELL` | Equivalent to `--shell` |
+| `SUDO_ADDITIONAL_PATHS_TO_EXPORT` | Equivalent to `--export-paths` |
+| `SUDO_ADDITIONAL_LD_LIBRARY_PATHS_TO_EXPORT` | Equivalent to `--export-ld-lib-paths` |
+| `SUDO_LOG_LEVEL` | Equivalent to `-v` level |
 
-CLI 显式参数优先级更高。
-
----
-
-## 安全模型
-
-`rsudo` 的目标是**简化 root 授权体验**，而不是在 su 之上再加一层权限系统。请理解：
-
-- **sudoers 校验按 uid**，一旦某个 uid 被加入 `allow`，它就能以 root 执行**任意命令**（与 `sudo` 的 `ALL` 等价）。
-- **sudoers 文件必须 owner=root、mode=0600**，否则拒绝加载；打开时使用 `O_NOFOLLOW`，避免被替换成符号链接。
-- **daemon 会 SO_PEERCRED 校验**每个连接的 uid，但无法防止同一 uid 内部进程冒充（这是 su 的固有语义）。
-- **审计日志**只是记录，不构成强访问控制；真正的 gating 仍然在 daemon 侧（`Sudoers::is_allowed`）。
-- **disabled 标记**在 `/data/local/tmp`，任何本进程都可读；不要把它当成安全边界。
-
-如果需要更细的粒度，建议：
-
-1. 只给必要 uid 授权；
-2. 对 daemon socket 目录做文件权限约束；
-3. 定期审计 `audit.log`；
-4. 不需要时用 `--daemon-disable` 完全关闭。
+Explicit CLI arguments take precedence.
 
 ---
 
-## 工作原理
+## Security Model
+
+`rsudo` aims to **simplify the root authorization experience**, not to add another layer of permission systems on top of `su`. Please note:
+- **Sudoers are validated by UID.** Once a UID is added to `allow`, it can execute **any command** as root (equivalent to `ALL` in `sudo`).
+- **The sudoers file must be owner=root, mode=0600**, otherwise loading is refused. Opening uses `O_NOFOLLOW` to prevent symlink replacement.
+- **The daemon validates every connection via `SO_PEERCRED`**, but cannot prevent process impersonation within the same UID (an inherent semantic of `su`).
+- **Audit logs** are for recording only, not for strong access control; the real gating is still on the daemon side (`Sudoers::is_allowed`).
+- **The disabled marker** is in `/data/local/tmp`, readable by any process of this app; do not treat it as a security boundary.
+
+For finer granularity, it is recommended to:
+1. Only authorize necessary UIDs;
+2. Restrict file permissions on the daemon socket directory;
+3. Regularly audit `audit.log`;
+4. Completely disable with `--daemon-disable` when not needed.
+
+---
+
+## How It Works
 
 ```text
 ┌──────────────────┐        ┌─────────────────────┐
@@ -398,35 +393,34 @@ CLI 显式参数优先级更高。
 fallback: su -c '<script>'
 ```
 
-### 关键模块
-
-- `src/app.rs`：顶层流程编排（加载配置 → 检测环境 → 决策 → 执行）。
-- `src/cli.rs`：clap 定义。
-- `src/decisions.rs`：`kind`、`PathLayout`、`SearchMode`、交互式判定。
-- `src/env.rs`：环境变量探测、SDK 缓存、各类路径常量。
-- `src/context.rs`：`TermuxEnv`（prefix / home / rootfs / sdk / cwd）。
-- `src/daemon/`：客户端、服务端、协议、执行、sudoers、生命周期。
-- `src/exec/`：`exec_file` / `interactive` / `script_mode` 三种执行器（su 路径）。
-- `src/script/`：脚本生成（`env_block`、`quote`、`build_*`）。
-- `src/su.rs`：`su` 能力探测（`--mount-master`、`-c`、`--preserve-environment` 等）。
-- `src/pty_config.rs`：pty 决策（模式 + 白/黑名单）。
-- `src/path.rs`：命令解析与路径比较。
-
----
-
-## 设计取舍
-
-- **daemon 是可选加速层，不是必需组件**。任何命令都能在 su 模式下跑通；daemon 只在满足条件时接管。
-- **`--dry-run` 永远走 su**，因为 daemon 直接 exec，不生成可打印脚本。
-- **PTY 仅在 daemon 路径提供**；su 路径依赖 `su` 自身的 tty 行为。
-- **sudoers 按 uid 而非按命令**：降低管理复杂度，代价是与 `sudo` 的 `Cmnd_Alias` 行为不同。
-- **`--shell-home` 与 daemon 兼容**：daemon 会自动把 `HOME` 设为 `t_env.root_home`，并在必要时 `ensure_home` 创建目录、改 `chown root:root`。
+### Key Modules
+- `src/app.rs`: Top-level flow orchestration (load config → detect env → decide → execute).
+- `src/cli.rs`: clap definitions.
+- `src/decisions.rs`: `kind`, `PathLayout`, `SearchMode`, interactive detection.
+- `src/env.rs`: Env var detection, SDK cache, path constants.
+- `src/context.rs`: `TermuxEnv` (prefix / home / rootfs / sdk / cwd).
+- `src/daemon/`: Client, server, protocol, execution, sudoers, lifecycle.
+- `src/exec/`: `exec_file` / `interactive` / `script_mode` executors (su path).
+- `src/script/`: Script generation (`env_block`, `quote`, `build_*`).
+- `src/su.rs`: `su` capability detection (`--mount-master`, `-c`, `--preserve-environment`, etc.).
+- `src/pty_config.rs`: pty decision (mode + whitelist/blacklist).
+- `src/path.rs`: Command resolution and path comparison.
 
 ---
 
-## 许可证
+## Design Trade-offs
 
-本项目使用 **Apache License 2.0** 发布，详见 [LICENSE](./LICENSE) 与 [NOTICE](./NOTICE)。
+- **The daemon is an optional acceleration layer, not a required component.** Any command can run in su mode; the daemon only takes over when conditions are met.
+- **`--dry-run` always uses su** because the daemon execs directly without generating printable scripts.
+- **PTY is only provided in the daemon path**; the su path relies on `su`'s own tty behavior.
+- **Sudoers are by UID, not by command:** Reduces management complexity at the cost of differing from `sudo`'s `Cmnd_Alias` behavior.
+- **`--shell-home` is daemon-compatible:** The daemon automatically sets `HOME` to `t_env.root_home`, creates the directory with `ensure_home` if necessary, and `chown root:root`.
+
+---
+
+## License
+
+This project is licensed under the **Apache License 2.0**. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE) for details.
 
 ```text
 rsudo
@@ -436,13 +430,12 @@ Copyright 2026 Wiltxxx
 
 ---
 
-## 相关链接
-
-- Termux：[https://termux.dev/](https://termux.dev/)
-- Magisk：[https://github.com/topjohnwu/Magisk](https://github.com/topjohnwu/Magisk)
-- KernelSU：[https://github.com/tiann/KernelSU](https://github.com/tiann/KernelSU)
-- Apache 2.0：[https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)
+## Related Links
+- Termux: [https://termux.dev/](https://termux.dev/)
+- Magisk: [https://github.com/topjohnwu/Magisk](https://github.com/topjohnwu/Magisk)
+- KernelSU: [https://github.com/tiann/KernelSU](https://github.com/tiann/KernelSU)
+- Apache 2.0: [https://www.apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 ---
 
-> README 描述基于当前源码（`VERSION = 6`）。如果你发现行为与文档不符，欢迎提 issue 或 PR。
+> README description based on current source (`VERSION = 6`). If you find discrepancies between behavior and documentation, feel free to open an issue or PR.
