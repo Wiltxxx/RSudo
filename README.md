@@ -1,4 +1,6 @@
 # RSudo
+[![TUR Package](https://img.shields.io/badge/TUR-rsudo-blueviolet)](https://github.com/termux-user-repository/tur)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 > 为 Termux 打造的高性能 `sudo` 替代品 —— Rust 实现，支持 su 直连与常驻守护进程两种模式。
 
